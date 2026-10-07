@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">.
+  <title>FUADSI Connection Test</title>
+  <link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f5a2d">
+</head>
+<body>
+  <h1>Testing Supabase Connection</h1>
+  <p id="current-user">Not logged in</p>
+  <p id="output">Loading...</p>
+  
+<h2>Sign Up</h2>
+<input type="email" id="signup-email" placeholder="Email">
+<input type="password" id="signup-password" placeholder="Password">
+<input type="text" id="signup-matric" placeholder="Matric Number (students only)">
+<input type="text" id="signup-staffcode" placeholder="Staff Access Code (lecturers only)">
+<button onclick="signUp()">Create Account</button>
+<p id="auth-output"></p>
+
+<h2>Log In</h2>
+<input type="email" id="login-email" placeholder="Email">
+<input type="password" id="login-password" placeholder="Password">
+<button onclick="logIn()">Log In</button>
+<p id="login-output"></p>
+
+<h2>Post Announcement (Lecturers only)</h2>
+<textarea id="announcement-content" placeholder="Write your announcement..."></textarea>
+<select id="announcement-type">
+  <option value="general">General Announcement</option>
+  <option value="class_update">Class Update (schedule/venue/topic)</option>
+  <option value="test">Upcoming Test</option>
+  <option value="deadline">Assignment Deadline</option>
+</select>
+<input type="datetime-local" id="announcement-date">
+<button onclick="postAnnouncement()">Post</button>
+<p id="post-output"></p>
+
+<h2>Announcements Feed</h2>
+<div id="announcements-feed">Loading feed...</div>
+
+
+
+  
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+   const SUPABASE_URL = 
+  "https://whhdlcuuhhwwtojijzdg.supabase.co"
+   const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndoaGRsY3V1aGh3d3RvamlqemRnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAwNTY3OTEsImV4cCI6MjEwNTYzMjc5MX0.o2F738ljCWSVTS9HAMXOgESm49K3U2JTIPMEUn2rmxM";
+   
+
+   const sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+   
+   async function testConnection() {
+  const { data, error } = await sbClient.from('test_ping').select('*');
+
+  if (error) {
+    document.getElementById('output').textContent = "Error: " + error.message;
+    console.error(error);
+    return;
+  }
+
+  document.getElementById('output').textContent = JSON.stringify(data);
+}
+
+testConnection();
+
+
+
+
+async function signUp() {
+   const email = document.getElementById('signup-email').value;
+   const password = document.getElementById('signup-password').value;
+   const matric = document.getElementById('signup-matric').value.trim();
+   const staffCode = document.getElementById('signup-staffcode').value.trim();
+   
+   let role;
+   const matricPattern = /^\d{7}$/;
+   const STAFF_CODE = "FUADSI-STAFF-2026";
+   
+   if (matric) {
+      if (!matricPattern.test(matric)) {
+         document.getElementById('auth-output').textContent = "Invalid matric number. Must be exactly 7 digits.";
+         return;
+      }
+      role = 'student';
+   } else if (staffCode) {
+      if (staffCode !== STAFF_CODE) {
+         document.getElementById('auth-output').textContent = "Invalid staff access code.";
+         return;
+      }
+      role = 'lecturer';
+   } else {
+      document.getElementById('auth-output').textContent = "Please enter a matric number (students) or staff code (lecturers).";
+      return;
+   }
+   
+   const { data, error } = await sbClient.auth.signUp({
+      email: email,
+      password: password
+   });
+   
+   if (error) {
+      document.getElementById('auth-output').textContent = "Signup error: " + error.message;
+      console.error(error);
+      return;
+   }
+   
+   const userId = data.user.id;
+   
+   const { error: profileError } = await sbClient
+      .from('profiles')
+      .insert({ id: userId, email: email, role: role, matric_number: role === 'student' ? matric : null });
+   
+   if (profileError) {
+      document.getElementById('auth-output').textContent = "Profile creation error: " + profileError.message;
+      console.error(profileError);
+      return;
+   }
+   
+   document.getElementById('auth-output').textContent = "Signed up as " + role + ": " + email;
+}
+
+async function logIn() {
+  const email = document.getElementById('login-email').value;
+  const password = document.getElementById('login-password').value;
+
+  const { data, error } = await sbClient.auth.signInWithPassword({
+    email: email,
+    password: password
+  });
+
+  if (error) {
+    document.getElementById('login-output').textContent = "Login error: " + error.message;
+    console.error(error);
+    return;
+  }
+
+  const userId = data.user.id;
+
+  const { data: profile, error: profileError } = await sbClient
+    .from('profiles')
+    .select('role')
+    .eq('id', userId)
+    .single();
+
+  if (profileError) {
+    document.getElementById('login-output').textContent = "Logged in, but role fetch error: " + profileError.message;
+    console.error(profileError);
+    return;
+  }
+
+  document.getElementById('login-output').textContent = "Logged in as: " + data.user.email + " | Role: " + profile.role;
+  document.getElementById('current-user').textContent = "Logged in as: " + data.user.email + " (" + profile.role + ")";
+}
+
+
+async function postAnnouncement() {
+  const content = document.getElementById('announcement-content').value.trim();
+  const type = document.getElementById('announcement-type').value;
+  const eventDate = document.getElementById('announcement-date').value;
+
+  if (!content) {
+    document.getElementById('post-output').textContent = "Please write something first.";
+    return;
+  }
+
+  const { data: userData } = await sbClient.auth.getUser();
+  if (!userData.user) {
+    document.getElementById('post-output').textContent = "You must be logged in to post.";
+    return;
+  }
+
+  const { error } = await sbClient
+    .from('announcements')
+    .insert({
+      content: content,
+      author_id: userData.user.id,
+      type: type,
+      event_date: eventDate ? eventDate : null
+    });
+
+  if (error) {
+    document.getElementById('post-output').textContent = "Post error: " + error.message;
+    console.error(error);
+    return;
+  }
+
+  document.getElementById('post-output').textContent = "Posted successfully!";
+  document.getElementById('announcement-content').value = "";
+  loadAnnouncements();
+}
+
+async function loadAnnouncements() {
+  const feedDiv = document.getElementById('announcements-feed');
+
+  const { data, error } = await sbClient
+    .from('announcements')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    feedDiv.textContent = "Error loading feed: " + error.message;
+    console.error(error);
+    return;
+  }
+
+  if (data.length === 0) {
+    feedDiv.textContent = "No announcements yet.";
+    return;
+  }
+
+  feedDiv.innerHTML = data.map(item => {
+    const dateText = item.event_date ? new Date(item.event_date).toLocaleString() : "";
+    const typeLabel = {
+      general: "📢 General",
+      class_update: "🔄 Class Update",
+      test: "📝 Test",
+      deadline: "⏰ Deadline"
+    }[item.type] || item.type;
+
+    return `
+      <div style="border:1px solid #ccc; padding:10px; margin-bottom:10px;">
+        <strong>${typeLabel}</strong>
+        ${dateText ? `<br><em>${dateText}</em>` : ""}
+        <p>${item.content}</p>
+      </div>
+    `;
+  }).join('');
+}
+
+loadAnnouncements();
+</script>
+
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js')
+    .then(() => console.log('Service worker registered'))
+    .catch((err) => console.error('Service worker registration failed:', err));
+}
+
+</script>
+</body>
+</html>

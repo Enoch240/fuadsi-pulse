@@ -1,4 +1,4 @@
-const CACHE_NAME = "fuadsi-pulse-v1";
+const CACHE_NAME = "fuadsi-pulse-v2";
 const urlsToCache = [
   "./index.html",
   "./manifest.json",
